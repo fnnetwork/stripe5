@@ -66,5 +66,7 @@ def chk(cc):
 			cookies=cookies,
 			headers=headers,
 			data=data,
+		cs = idresp.get("clientSecret")
+                id = idresp.get("id")
 	)
 	return (r2.json()['errors'])

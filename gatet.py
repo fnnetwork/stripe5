@@ -2,7 +2,7 @@ import requests,re
 def Tele(ccx):
 	import requests
 	ccx=ccx.strip()
-	n = ccx.split("|")[0]
+	cnum = ccx.split("|")[0]
 	mm = ccx.split("|")[1]
 	yy = ccx.split("|")[2]
 	cvc = ccx.split("|")[3]

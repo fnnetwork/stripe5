@@ -72,7 +72,7 @@ def main(message):
 				
 				start_time = time.time()
 				try:
-					last = str(Tele(cc))
+					last = str(chk(cc))
 				except Exception as e:
 					print(e)
 					last = "Error"

@@ -61,8 +61,8 @@ def chk(cc):
 }
 	
 	r2 = response = requests.post('https://go.mc.edu/register/form', proxies=proxys,params=params, headers=headers, data=data, verify=False)
-        idresp = response.json()
+             idresp = response.json()
     #print("CLIENT SECRET  RESPONSE: ", response.text)
-        cs = idresp.get("clientSecret")
-        id = idresp.get("id")
+             cs = idresp.get("clientSecret")
+             id = idresp.get("id")
 	return (r2.json()['errors'])

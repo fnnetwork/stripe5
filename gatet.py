@@ -68,4 +68,5 @@ def chk(cc):
 			data=data,
     #print("CLIENT SECRET  RESPONSE: ", response.text)
              cs = idresp.get("clientSecret")
+	)
 	return (r2.json()['errors'])

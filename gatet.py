@@ -3,8 +3,8 @@ def Tele(ccx):
 	import requests
 	ccx=ccx.strip()
 	cnum = ccx.split("|")[0]
-	mm = ccx.split("|")[1]
-	yy = ccx.split("|")[2]
+	month = ccx.split("|")[1]
+	year = ccx.split("|")[2]
 	cvc = ccx.split("|")[3]
 	if "20" in yy:#Mo3gza
 		yy = yy.split("20")[1]

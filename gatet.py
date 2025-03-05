@@ -60,13 +60,9 @@ def chk(cc):
     'add_fee': '0',
 }
 	
-	r2 = requests.post(
-			'https://go.mc.edu/register/form',
-			params=params,
-			cookies=cookies,
-			headers=headers,
-			data=data,
-		cs = idresp.get("clientSecret")
-                id = idresp.get("id")
-	)
+	r2 = response = requests.post('https://go.mc.edu/register/form', proxies=proxys,params=params, headers=headers, data=data, verify=False)
+        idresp = response.json()
+    #print("CLIENT SECRET  RESPONSE: ", response.text)
+        cs = idresp.get("clientSecret")
+        id = idresp.get("id")
 	return (r2.json()['errors'])

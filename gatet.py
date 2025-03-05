@@ -1,7 +1,6 @@
 import requests,re
-def Tele(ccx):
+def chk(cc):
 	import requests
-	ccx=ccx.strip()
 	cnum, month, year, cvc = cc.split('|')
 	r = requests.session()
 

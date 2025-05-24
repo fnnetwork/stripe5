@@ -156,6 +156,10 @@ async def sh(message):
         try:
             async with r.post('https://www.buildingnewfoundations.com/cart', headers=headers, data=data, allow_redirects=True) as response:
                 text = await response.text()
+                # Save full HTML to file
+                with open('checkout_response.html', 'w') as f:
+                    f.write(text)
+                logger.info("Full checkout HTML saved to checkout_response.html")
                 logger.info(f"Checkout response HTML (first 1000 chars): {text[:1000]}")
                 logger.info(f"Final URL after redirects: {response.url}")
                 if response.status != 200:
@@ -168,15 +172,36 @@ async def sh(message):
                 stableid = find_between(text, 'stableId":"', '"')
                 paymentmethodidentifier = find_between(text, 'paymentMethodIdentifier":"', '"')
 
-                # Fallback with BeautifulSoup if values are missing
+                # Fallback with BeautifulSoup
                 if not all([x, queue_token, stableid, paymentmethodidentifier]):
                     logger.warning("find_between failed, attempting BeautifulSoup parsing")
                     soup = BeautifulSoup(text, 'html.parser')
-                    # Adjust these selectors based on actual HTML inspection
-                    x = soup.find('meta', {'name': 'serialized-session-token'})['content'] if soup.find('meta', {'name': 'serialized-session-token'}) else ''
-                    queue_token = soup.find('input', {'name': 'queueToken'})['value'] if soup.find('input', {'name': 'queueToken'}) else ''
-                    stableid = soup.find('input', {'name': 'stableId'})['value'] if soup.find('input', {'name': 'stableId'}) else ''
-                    paymentmethodidentifier = soup.find('input', {'name': 'paymentMethodIdentifier'})['value'] if soup.find('input', {'name': 'paymentMethodIdentifier'}) else ''
+                    # Parse session_token (already working)
+                    x = soup.find('meta', {'name': 'serialized-session-token'})['content'] if soup.find('meta', {'name': 'serialized-session-token'}) else x
+                    # Try alternative selectors for others
+                    # Look for inputs, data attributes, or script tags
+                    queue_token = soup.find('input', {'name': 'queue_token'})['value'] if soup.find('input', {'name': 'queue_token'}) else queue_token
+                    stableid = soup.find('input', {'name': 'stable_id'})['value'] if soup.find('input', {'name': 'stable_id'}) else stableid
+                    paymentmethodidentifier = soup.find('input', {'name': 'payment_method_identifier'})['value'] if soup.find('input', {'name': 'payment_method_identifier'}) else paymentmethodidentifier
+
+                    # Try parsing script tags for JSON data
+                    if not all([queue_token, stableid, paymentmethodidentifier]):
+                        logger.info("Input parsing failed, searching script tags")
+                        scripts = soup.find_all('script')
+                        for script in scripts:
+                            if script.string and 'queueToken' in script.string:
+                                try:
+                                    # Look for JSON-like data
+                                    json_match = re.search(r'var checkout = ({.*?});', script.string, re.DOTALL)
+                                    if json_match:
+                                        checkout_data = json.loads(json_match.group(1))
+                                        queue_token = checkout_data.get('queueToken', queue_token)
+                                        stableid = checkout_data.get('stableId', stableid)
+                                        paymentmethodidentifier = checkout_data.get('paymentMethodIdentifier', paymentmethodidentifier)
+                                        logger.info(f"Found in script: queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
+                                        break
+                                except Exception as e:
+                                    logger.error(f"Error parsing script tag: {str(e)}")
 
                 logger.info(f"Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
                 if not all([x, queue_token, stableid, paymentmethodidentifier]):

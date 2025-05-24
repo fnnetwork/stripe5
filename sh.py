@@ -393,6 +393,6 @@ Taken: {elapsed_time:.2f}s
 Bot by: TrickLab"""
 
 # Run the script
-if __main__ == "__main__":
+if __name__ == "__main__":
     ok = input("Card: ")
     print(asyncio.run(sh(ok)))

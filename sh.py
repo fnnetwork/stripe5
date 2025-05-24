@@ -9,7 +9,7 @@ import random
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - __main__ - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def find_between(s, first, last):
@@ -156,10 +156,28 @@ async def sh(message):
         try:
             async with r.post('https://www.buildingnewfoundations.com/cart', headers=headers, data=data, allow_redirects=True) as response:
                 text = await response.text()
+                logger.info(f"Checkout response HTML (first 1000 chars): {text[:1000]}")
+                logger.info(f"Final URL after redirects: {response.url}")
+                if response.status != 200:
+                    logger.error(f"Checkout request failed: Status {response.status}")
+                    return "Failed to initiate checkout: Invalid response"
+
+                # Try original find_between method
                 x = find_between(text, 'serialized-session-token" content=""', '""')
                 queue_token = find_between(text, '"queueToken":"', '"')
                 stableid = find_between(text, 'stableId":"', '"')
                 paymentmethodidentifier = find_between(text, 'paymentMethodIdentifier":"', '"')
+
+                # Fallback with BeautifulSoup if values are missing
+                if not all([x, queue_token, stableid, paymentmethodidentifier]):
+                    logger.warning("find_between failed, attempting BeautifulSoup parsing")
+                    soup = BeautifulSoup(text, 'html.parser')
+                    # Adjust these selectors based on actual HTML inspection
+                    x = soup.find('meta', {'name': 'serialized-session-token'})['content'] if soup.find('meta', {'name': 'serialized-session-token'}) else ''
+                    queue_token = soup.find('input', {'name': 'queueToken'})['value'] if soup.find('input', {'name': 'queueToken'}) else ''
+                    stableid = soup.find('input', {'name': 'stableId'})['value'] if soup.find('input', {'name': 'stableId'}) else ''
+                    paymentmethodidentifier = soup.find('input', {'name': 'paymentMethodIdentifier'})['value'] if soup.find('input', {'name': 'paymentMethodIdentifier'}) else ''
+
                 logger.info(f"Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
                 if not all([x, queue_token, stableid, paymentmethodidentifier]):
                     logger.error("One or more checkout values are missing")

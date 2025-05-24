@@ -153,6 +153,7 @@ async def sh(message):
             'updates[]': '1',
             'checkout': 'Check out',
         }
+        x = queue_token = stableid = paymentmethodidentifier = ""
         for attempt in range(3):  # Retry up to 3 times
             try:
                 async with r.post('https://www.buildingnewfoundations.com/cart', headers=headers, data=data, allow_redirects=True) as response:
@@ -228,14 +229,14 @@ async def sh(message):
                         break
                     logger.warning(f"Attempt {attempt + 1}: Missing values, retrying...")
                     await asyncio.sleep(1)  # Wait before retrying
-                else:
-                    logger.error("All retry attempts failed")
-                    return "Failed to initiate checkout: Missing values"
             except Exception as e:
                 logger.error(f"Attempt {attempt + 1}: Error initiating checkout: {str(e)}")
                 if attempt == 2:
                     return "Failed to initiate checkout: " + str(e)
                 await asyncio.sleep(1)
+        else:
+            logger.error("All retry attempts failed")
+            return "Failed to initiate checkout: Missing values"
 
         logger.info(f"Final Checkout values: session_token={x}, queue_token={queue_token}, stableid={stableid}, paymentmethodidentifier={paymentmethodidentifier}")
         if not all([x, queue_token, stableid, paymentmethodidentifier]):
@@ -343,4 +344,4 @@ async def sh(message):
         }
         elapsed_time = time.time() - start_time
         try:
-            async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/graphql', params=params, headers=headers, jso
+            async with r.post('https://www.buildingnewfoundations.com/checkouts/unstable/gra

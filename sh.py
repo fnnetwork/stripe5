@@ -2,7 +2,7 @@
 
 import aiohttp
 from bs4 import BeautifulSoup
-from fake_useragent import UserAgent
+import user_agent
 import re
 import base64
 import json
